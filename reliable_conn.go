@@ -97,7 +97,8 @@ func (this *ReliableConn) Write(b []byte) (n int, err error) {
 		n, orig_err = this.internal.Write(cp)
 	}
 	if !this.isConnected || orig_err != nil {
-		    if Logger != nil {
+	if Logger != nil {
+	    Logger.Error(orig_err)
         Logger.Error("disconnected")
     }
 
