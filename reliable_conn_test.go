@@ -8,7 +8,14 @@ import (
 	"testing"
 	"time"
 	"crypto/tls"
+	"github.com/Sirupsen/logrus"
+	"os"
 )
+
+func TestMain(m *testing.M) {
+	Logger = logrus.New()
+	os.Exit(m.Run())
+}
 
 type Listener func(network, laddr string) (net.Listener, error)
 

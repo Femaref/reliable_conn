@@ -5,7 +5,12 @@ import (
 	"net"
 	"sync"
 	"time"
+	"github.com/Sirupsen/logrus"
 )
+
+var Logger *logrus.Logger
+
+
 
 type ReliableConn struct {
 	Network string
@@ -55,11 +60,15 @@ func (this *ReliableConn) Connect() {
 	var new_conn net.Conn
 	for local_error != nil {
 		new_conn, local_error = this.dialer(this.Network, this.Address)
-		fmt.Println(local_error)
+		if Logger != nil {
+		    Logger.Error(local_error)
+		}
 		time.Sleep(time.Second)
 	}
 	this.internal = new_conn
-	fmt.Println("reconnected")
+    if Logger != nil {
+        Logger.Info("reconnected")
+    }
 	this.isConnected = true
 	this.isReconnecting = false
 
@@ -88,7 +97,10 @@ func (this *ReliableConn) Write(b []byte) (n int, err error) {
 		n, orig_err = this.internal.Write(cp)
 	}
 	if !this.isConnected || orig_err != nil {
-		fmt.Println("disconnected")
+		    if Logger != nil {
+        Logger.Error("disconnected")
+    }
+
 		this.q_m.Lock()
 		this.queue = append(this.queue, cp)
 		this.q_m.Unlock()
