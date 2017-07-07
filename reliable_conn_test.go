@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 	"crypto/tls"
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"os"
 )
 
