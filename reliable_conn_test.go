@@ -228,6 +228,59 @@ func TestMonkeyWrite(t *testing.T) {
 	}
 }
 
+
+func TestBackOff(t *testing.T) {
+	var err error
+	port, listener, did_receive, err := listenerForTest("0", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := fmt.Sprintf("127.0.0.1:%s", port)
+	conn, err := Dial("tcp", host)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := conn.(*ReliableConn)
+	rc.Connect()
+	fmt.Fprintf(conn, "before_close")
+	rc.internal.Close()
+	listener.Close()
+
+	to_send := []string{"ping", "pong", "pow"}
+	for _, elem := range to_send {
+		fmt.Fprintf(conn, fmt.Sprintf("%s\n", elem))
+	}
+	time.Sleep(1500 * time.Millisecond)
+
+	for _, elem := range to_send {
+		if did_receive(elem) {
+			t.Errorf("listener received %s to early", elem)
+		}
+	}
+
+	port, listener, did_receive, err = listenerForTest(port, 1)
+	defer listener.Close()
+
+	time.Sleep(1500 * time.Millisecond)
+
+	for _, elem := range to_send {
+		if did_receive(elem) {
+			t.Errorf("listener received %s to early", elem)
+		}
+	}
+
+	time.Sleep(1500 * time.Millisecond)
+
+	for _, elem := range to_send {
+		if !did_receive(elem) {
+			t.Errorf("listener did not receive %s", elem)
+		}
+	}
+}
+
+
+
 func TestTLS(t *testing.T) {
     cer, err := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
     if err != nil {
