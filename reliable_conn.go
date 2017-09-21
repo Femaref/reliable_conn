@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 	"github.com/sirupsen/logrus"
+	"github.com/cenkalti/backoff"
 )
 
 var Logger *logrus.Logger
@@ -15,6 +16,7 @@ var Logger *logrus.Logger
 type ReliableConn struct {
 	Network string
 	Address string
+	Backoff backoff.BackOff
 
 	isConnected    bool
 	isReconnecting bool
@@ -50,6 +52,17 @@ func (this *ReliableConn) Connect() {
 	this.m.Lock()
 	defer this.m.Unlock()
 
+	if this.Backoff == nil {
+		e := backoff.NewExponentialBackOff()
+
+		e.InitialInterval = time.Second
+		e.Multiplier = 2
+		e.MaxInterval = 10 * time.Second
+		e.MaxElapsedTime = 0
+
+		this.Backoff = e
+	}
+
 	if this.isConnected || this.isReconnecting {
 		return
 	}
@@ -63,8 +76,9 @@ func (this *ReliableConn) Connect() {
 		if Logger != nil {
 		    Logger.Error(local_error)
 		}
-		time.Sleep(time.Second)
+		time.Sleep(this.Backoff.NextBackOff())
 	}
+	this.Backoff.Reset()
 	this.internal = new_conn
     if Logger != nil {
         Logger.Info("reconnected")
