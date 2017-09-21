@@ -73,16 +73,18 @@ func (this *ReliableConn) Connect() {
 	var new_conn net.Conn
 	for local_error != nil {
 		new_conn, local_error = this.dialer(this.Network, this.Address)
-		if Logger != nil {
-		    Logger.Error(local_error)
+		if local_error != nil {
+			if Logger != nil {
+				Logger.Error(fmt.Errorf("reliable_conn: can't connect: %v", local_error))
+			}
+			time.Sleep(this.Backoff.NextBackOff())
 		}
-		time.Sleep(this.Backoff.NextBackOff())
 	}
 	this.Backoff.Reset()
-	this.internal = new_conn
-    if Logger != nil {
-        Logger.Info("reconnected")
+    if Logger != nil && this.internal != nil {
+        Logger.Info("reliable_conn: reconnected")
     }
+	this.internal = new_conn
 	this.isConnected = true
 	this.isReconnecting = false
 
@@ -111,10 +113,9 @@ func (this *ReliableConn) Write(b []byte) (n int, err error) {
 		n, orig_err = this.internal.Write(cp)
 	}
 	if !this.isConnected || orig_err != nil {
-	if Logger != nil {
-	    Logger.Error(orig_err)
-        Logger.Error("disconnected")
-    }
+		if orig_err != nil && Logger != nil {
+			Logger.Error(fmt.Errorf("reliable_conn: disconnected: %v", orig_err))
+		}
 
 		this.q_m.Lock()
 		this.queue = append(this.queue, cp)
