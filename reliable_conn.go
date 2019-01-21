@@ -131,6 +131,7 @@ func (this *ReliableConn) Write(b []byte) (n int, err error) {
 }
 
 func (this *ReliableConn) Close() error {
+	this.isConnected = false
 	return this.internal.Close()
 }
 
