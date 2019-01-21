@@ -1,15 +1,17 @@
 package reliable_conn
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"crypto/tls"
+
 	"github.com/sirupsen/logrus"
-	"os"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
@@ -19,16 +21,16 @@ func TestMain(m *testing.M) {
 
 type Listener func(network, laddr string) (net.Listener, error)
 
-func listenerForTest(port string, expected_total_conns int) (string, net.Listener, func(string) bool, error) {
-    return listenerForTestWithListener(port, expected_total_conns, nil)
+func listenerForTest(port string, expected_total_conns int, cont_write bool) (string, net.Listener, func(string) bool, error) {
+	return listenerForTestWithListener(port, expected_total_conns, cont_write, nil)
 }
 
-func listenerForTestWithListener(port string, expected_total_conns int, l Listener) (string, net.Listener, func(string) bool, error) {
-    if l == nil {
-        l = net.Listen
-    }
+func listenerForTestWithListener(port string, expected_total_conns int, cont_write bool, l Listener) (p string, listener net.Listener, did_receive func(string) bool, err error) {
+	if l == nil {
+		l = net.Listen
+	}
 	host := fmt.Sprintf("127.0.0.1:%s", port)
-	listener, err := l("tcp", host)
+	listener, err = l("tcp", host)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -68,6 +70,12 @@ func listenerForTestWithListener(port string, expected_total_conns int, l Listen
 					m.Unlock()
 				}()
 				for {
+
+					if cont_write {
+						fmt.Fprint(c, "ping")
+						time.Sleep(250 * time.Millisecond)
+						continue
+					}
 					var err error
 					var buffer []byte
 					buffer, err = waitFor(c)
@@ -86,6 +94,7 @@ func listenerForTestWithListener(port string, expected_total_conns int, l Listen
 					if err != nil {
 						return
 					}
+
 				}
 			}(conn)
 		}
@@ -112,7 +121,7 @@ func waitFor(conn net.Conn) (buffer []byte, err error) {
 
 func TestListener(t *testing.T) {
 	var err error
-	port, listener, did_receive, err := listenerForTest("0", 1)
+	port, listener, did_receive, err := listenerForTest("0", 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +153,7 @@ func TestListener(t *testing.T) {
 
 func TestNormalOperation(t *testing.T) {
 	var err error
-	port, listener, _, err := listenerForTest("0", 1)
+	port, listener, _, err := listenerForTest("0", 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,28 +181,44 @@ func TestNormalOperation(t *testing.T) {
 
 func TestMonkeyRead(t *testing.T) {
 	var err error
-	port, listener, _, err := listenerForTest("0", 1)
+	port, listener, _, err := listenerForTest("0", 2, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
 	host := fmt.Sprintf("127.0.0.1:%s", port)
-	conn, err := Dial("tcp", host)
+	var d net.Dialer
+	d.Timeout = time.Second
+	conn, err := DialWithDialer("tcp", host, d.Dial)
 
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer conn.Close()
 	rc := conn.(*ReliableConn)
 	rc.Connect()
 
-	rc.internal.Close()
 	buffer := make([]byte, 1024)
-	_, err = rc.Read(buffer)
+	var n int
+	n, err = rc.Read(buffer)
+	if err != nil {
+		t.Error(err)
+	}
+
+	assert.Equal(t, "ping", string(buffer[:n]))
+
+	rc.internal.Close()
+	n, err = rc.Read(buffer)
+	if err != nil {
+		t.Error(err)
+	}
+
+	assert.Equal(t, "ping", string(buffer[:n]))
 }
 
 func TestMonkeyWrite(t *testing.T) {
 	var err error
-	port, listener, did_receive, err := listenerForTest("0", 1)
+	port, listener, did_receive, err := listenerForTest("0", 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,10 +253,9 @@ func TestMonkeyWrite(t *testing.T) {
 	}
 }
 
-
 func TestBackOff(t *testing.T) {
 	var err error
-	port, listener, did_receive, err := listenerForTest("0", 1)
+	port, listener, did_receive, err := listenerForTest("0", 1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +283,7 @@ func TestBackOff(t *testing.T) {
 		}
 	}
 
-	port, listener, did_receive, err = listenerForTest(port, 1)
+	port, listener, did_receive, err = listenerForTest(port, 1, false)
 	defer listener.Close()
 
 	time.Sleep(1500 * time.Millisecond)
@@ -279,26 +303,24 @@ func TestBackOff(t *testing.T) {
 	}
 }
 
-
-
 func TestTLS(t *testing.T) {
-    cer, err := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
-    if err != nil {
-        t.Fatal(err)
-    }
+	cer, err := tls.LoadX509KeyPair("testdata/server.crt", "testdata/server.key")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    config := &tls.Config{Certificates: []tls.Certificate{cer}}
+	config := &tls.Config{Certificates: []tls.Certificate{cer}}
 
-    l := func(network, laddr string) (net.Listener, error) {
-        return tls.Listen(network, laddr, config)
-    }
+	l := func(network, laddr string) (net.Listener, error) {
+		return tls.Listen(network, laddr, config)
+	}
 
-    d := func(network, address string) (net.Conn, error) {
-        config := &tls.Config{InsecureSkipVerify:true}
-        return tls.Dial(network, address, config)
-    }
+	d := func(network, address string) (net.Conn, error) {
+		config := &tls.Config{InsecureSkipVerify: true}
+		return tls.Dial(network, address, config)
+	}
 
-    port, listener, _, err := listenerForTestWithListener("0", 1, l)
+	port, listener, _, err := listenerForTestWithListener("0", 1, false, l)
 	if err != nil {
 		t.Fatal(err)
 	}

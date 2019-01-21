@@ -5,13 +5,12 @@ import (
 	"net"
 	"sync"
 	"time"
-	"github.com/sirupsen/logrus"
+
 	"github.com/cenkalti/backoff"
+	"github.com/sirupsen/logrus"
 )
 
 var Logger *logrus.Logger
-
-
 
 type ReliableConn struct {
 	Network string
@@ -27,23 +26,22 @@ type ReliableConn struct {
 	dialer         Dialer
 }
 
-
 type Dialer func(network, address string) (net.Conn, error)
 
 func Dial(network, address string) (net.Conn, error) {
-    return DialWithDialer(network, address, nil)
+	return DialWithDialer(network, address, nil)
 }
 
 func DialWithDialer(network, address string, dialer Dialer) (net.Conn, error) {
-    if dialer == nil {
-        dialer = net.Dial
-    }
+	if dialer == nil {
+		dialer = net.Dial
+	}
 	return &ReliableConn{
-	    Network: network,
-	    Address: address,
-	    m: new(sync.Mutex),
-	    q_m: new(sync.Mutex),
-	    dialer: dialer,
+		Network: network,
+		Address: address,
+		m:       new(sync.Mutex),
+		q_m:     new(sync.Mutex),
+		dialer:  dialer,
 	}, nil
 }
 
@@ -81,9 +79,9 @@ func (this *ReliableConn) Connect() {
 		}
 	}
 	this.Backoff.Reset()
-    if Logger != nil && this.internal != nil {
-        Logger.Info("reliable_conn: reconnected")
-    }
+	if Logger != nil && this.internal != nil {
+		Logger.Info("reliable_conn: reconnected")
+	}
 	this.internal = new_conn
 	this.isConnected = true
 	this.isReconnecting = false
@@ -100,11 +98,30 @@ func (this *ReliableConn) Connect() {
 }
 
 func (this *ReliableConn) Read(b []byte) (n int, err error) {
-	if !this.isConnected {
-		this.Connect()
+	var orig_err error
+	for {
+		this.m.Lock()
+		if this.isConnected {
+			n, orig_err = this.internal.Read(b)
+		}
+		this.m.Unlock()
+		if orig_err == nil {
+			return
+		}
+		if !this.isConnected || orig_err != nil {
+			if orig_err != nil && Logger != nil {
+				Logger.Error(fmt.Errorf("reliable_conn: disconnected: %v", orig_err))
+			}
+			this.m.Lock()
+			if this.isConnected {
+				this.isConnected = false
+			}
+			this.m.Unlock()
+			this.Connect()
+		}
 	}
-	return this.internal.Read(b)
 }
+
 func (this *ReliableConn) Write(b []byte) (n int, err error) {
 	var orig_err error
 	cp := make([]byte, len(b))
@@ -131,6 +148,7 @@ func (this *ReliableConn) Write(b []byte) (n int, err error) {
 }
 
 func (this *ReliableConn) Close() error {
+	this.isConnected = false
 	return this.internal.Close()
 }
 
