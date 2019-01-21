@@ -103,11 +103,13 @@ func (this *ReliableConn) Read(b []byte) (n int, err error) {
 		this.m.Lock()
 		if this.isConnected {
 			n, orig_err = this.internal.Read(b)
+			if orig_err == nil {
+				this.m.Unlock()
+				return
+			}
 		}
 		this.m.Unlock()
-		if orig_err == nil {
-			return
-		}
+
 		if !this.isConnected || orig_err != nil {
 			if orig_err != nil && Logger != nil {
 				Logger.Error(fmt.Errorf("reliable_conn: disconnected: %v", orig_err))
@@ -148,8 +150,15 @@ func (this *ReliableConn) Write(b []byte) (n int, err error) {
 }
 
 func (this *ReliableConn) Close() error {
-	this.isConnected = false
-	return this.internal.Close()
+	this.m.Lock()
+	defer this.m.Unlock()
+	if this.isConnected {
+		this.isConnected = false
+		if this.internal != nil {
+			return this.internal.Close()
+		}
+	}
+	return nil
 }
 
 func (this *ReliableConn) LocalAddr() net.Addr {

@@ -216,6 +216,33 @@ func TestMonkeyRead(t *testing.T) {
 	assert.Equal(t, "ping", string(buffer[:n]))
 }
 
+func TestUnconnectedRead(t *testing.T) {
+	var err error
+	port, listener, _, err := listenerForTest("0", 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	host := fmt.Sprintf("127.0.0.1:%s", port)
+	var d net.Dialer
+	d.Timeout = time.Second
+	conn, err := DialWithDialer("tcp", host, d.Dial)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	buffer := make([]byte, 1024)
+	var n int
+	n, err = conn.Read(buffer)
+	if err != nil {
+		t.Error(err)
+	}
+
+	assert.Equal(t, "ping", string(buffer[:n]))
+}
+
 func TestMonkeyWrite(t *testing.T) {
 	var err error
 	port, listener, did_receive, err := listenerForTest("0", 1, false)
